@@ -1,0 +1,27 @@
+{
+    "name": "s25/avalara-extension",
+    "description": "s25/avalara-extension",
+    "type": "shopware-platform-plugin",
+    "version": "1.0.0",
+    "license": "MIT",
+    "require": {
+        "shopware/core": "~6.6.0"
+    },
+    "extra": {
+        "shopware-plugin-class": "AvalaraExtension\\AvalaraExtension",
+        "label": {
+            "de-DE": "Avalara Extension",
+            "en-GB": "Avalara Extension"
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "AvalaraExtension\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AvalaraExtension\\Tests\\": "tests/"
+        }
+    }
+}

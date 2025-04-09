@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+
+<container xmlns="http://symfony.com/schema/dic/services"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
+
+    <services>
+        <service id="AvalaraExtension\Core\Checkout\Cart\ExtendOverwritePriceProcessor" public="true">
+            <tag name="shopware.cart.processor" priority="-5400"/>
+        </service>
+
+        <service id="AvalaraExtension\Core\Checkout\Cart\AvalaraPriceProcessorDecorate" decorates="MoptAvalara6\Core\Checkout\Cart\OverwritePriceProcessor">
+            <argument type="service" id="Shopware\Core\Checkout\Cart\Price\QuantityPriceCalculator"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService" />
+            <argument type="service" id="category.repository" />
+            <argument type="service" id="monolog.logger" />
+            <argument type="service" id="AvalaraExtension\Core\Checkout\Cart\AvalaraPriceProcessorDecorate.inner"/>
+            <tag name="shopware.cart.processor" priority="-5200"/>
+        </service>
+
+    </services>
+</container>
