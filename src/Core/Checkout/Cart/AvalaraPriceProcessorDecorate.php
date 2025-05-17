@@ -8,13 +8,12 @@ use Shopware\Core\Checkout\Cart\Cart;
 use Shopware\Core\Checkout\Cart\CartBehavior;
 use Shopware\Core\Checkout\Cart\LineItem\CartDataCollection;
 use Shopware\Core\Checkout\Cart\LineItem\LineItem;
-use Shopware\Core\Checkout\Cart\Order\OrderConverter;
-use Shopware\Core\Checkout\Cart\Price\QuantityPriceCalculator;
 use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\HttpFoundation\Session\Session;
@@ -26,9 +25,6 @@ use Shopware\Core\Checkout\Cart\Tax\Struct\TaxRuleCollection;
 
 class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 {
-
-  private QuantityPriceCalculator $calculator;
-
   private SystemConfigService $systemConfigService;
 
   private EntityRepository $categoryRepository;
@@ -37,27 +33,92 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
   private $avalaraTaxes;
 
-  private EntityRepository $orderLineItemRepository;
+  private EntityRepository $productRepository;
 
   private Logger $logger;
 
+  private array $bundleChildMap = [];
 
   public function __construct(
-    QuantityPriceCalculator $calculator,
-    SystemConfigService     $systemConfigService,
-    EntityRepository        $categoryRepository,
-    EntityRepository        $orderLineItemRepository,
-    Logger                  $loggerMonolog,
+    SystemConfigService $systemConfigService,
+    EntityRepository    $categoryRepository,
+    EntityRepository    $productRepository,
+    Logger              $loggerMonolog,
   )
   {
-    $this->calculator = $calculator;
     $this->systemConfigService = $systemConfigService;
     $this->session = new SessionService();
     $this->categoryRepository = $categoryRepository;
-    $this->orderLineItemRepository = $orderLineItemRepository;
+    $this->productRepository = $productRepository;
     $this->logger = $loggerMonolog;
   }
 
+  private function expandBundles(Cart $cart, SalesChannelContext $context): void
+  {
+    foreach ($cart->getLineItems() as $bundle) {
+      $children = $bundle->getPayloadValue('bundleContent') ?? [];
+      if (!$children) {
+        continue;
+      }
+
+      $cart->remove($bundle->getId());
+
+      foreach ($children as $row) {
+
+        $product = $this->productRepository->search(new Criteria([$row['productId']]), $context->getContext())->first();
+
+        $sku = $product->getProductNumber();
+
+        $child = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, $row['productId'], $row['quantity']);
+        $child->setPayloadValue('productNumber', $sku);
+
+        $child->setLabel($product->getName());
+
+        $price = $product->getPrice()->first()->getNet();
+
+        $lineTotal = $price * $row['quantity'];
+        $rate = $product->getTax()->getTaxRate() ?? 0.0;
+        $taxAmount = $lineTotal * $rate / 100;
+
+        $taxRules = new TaxRuleCollection([new TaxRule($rate)]);
+        $taxes = new CalculatedTaxCollection([new CalculatedTax($taxAmount, $rate, $lineTotal)]);
+
+        $child->setPrice(
+          new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $row['quantity'])
+        );
+        $cart->add($child);
+
+        $this->bundleChildMap[$bundle->getPayloadValue('productNumber')][$sku] = $lineTotal;
+      }
+    }
+  }
+
+  private function collapseBundleTaxes(): void
+  {
+    foreach ($this->bundleChildMap as $bundleSku => $childRows) {
+
+      $taxSum = 0.0;
+      $netSum = 0.0;
+
+      foreach ($childRows as $childSku => $lineTotal) {
+        if (!isset($this->avalaraTaxes[$childSku])) {
+          continue;
+        }
+        $taxSum += $this->avalaraTaxes[$childSku]['tax'];
+        $netSum += $lineTotal;
+        unset($this->avalaraTaxes[$childSku]);
+      }
+
+      if ($netSum === 0.0) {
+        continue;
+      }
+
+      $this->avalaraTaxes[$bundleSku] = [
+        'tax' => $taxSum,
+        'rate' => round($taxSum / $netSum * 100, 4),
+      ];
+    }
+  }
 
   public function process(CartDataCollection $data, Cart $original, Cart $toCalculate, SalesChannelContext $context, CartBehavior $behavior): void
   {
@@ -65,12 +126,13 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
     $adapter = new AvalaraSDKAdapter($this->systemConfigService, $this->logger, $salesChannelId);
     $this->avalaraTaxes = $this->session->getValue(Form::SESSION_AVALARA_TAXES_TRANSFORMED, $adapter);
 
-
     if ($this->isTaxesUpdateNeeded() && $original->getDeliveries()->getAddresses()->getCountries()->first()) {
 
+      $avalaraCart = clone $original;
+      $this->expandBundles($avalaraCart, $context);
       $service = $adapter->getService('GetTax');
-      $this->avalaraTaxes = $service->getAvalaraTaxes($original, $context, $this->session, $this->categoryRepository);
-
+      $this->avalaraTaxes = $service->getAvalaraTaxes($avalaraCart, $context, $this->session, $this->categoryRepository);
+      $this->collapseBundleTaxes();
       $this->validateTaxes($adapter, $toCalculate);
     }
 
@@ -158,7 +220,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       $price->getTotalPrice()
     );
 
-    if($this->avalaraTaxes[$productNumber]['tax'] == 0) {
+    if ($this->avalaraTaxes[$productNumber]['tax'] == 0) {
       $this->avalaraTaxes[$productNumber]['rate'] = 0;
     }
 
