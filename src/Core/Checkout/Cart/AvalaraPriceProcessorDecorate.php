@@ -72,6 +72,8 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         $child = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, $row['productId'], $row['quantity']);
         $child->setPayloadValue('productNumber', $sku);
 
+        $child->setPayloadValue('customFields', $product->getTranslated()['customFields']);
+
         $child->setLabel($product->getName());
 
         $price = $product->getPrice()->first()->getNet();
