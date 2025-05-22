@@ -3,9 +3,13 @@
 namespace AvalaraExtension\Core\Checkout\Cart;
 
 use MoptAvalara6\Bootstrap\Form;
+use MoptAvalara6\Core\Checkout\Cart\CartBlockedError;
 use MoptAvalara6\Service\SessionService;
+use Shopware\Core\Checkout\Cart\Address\Error\ShippingAddressBlockedError;
 use Shopware\Core\Checkout\Cart\Cart;
 use Shopware\Core\Checkout\Cart\CartBehavior;
+use Shopware\Core\Checkout\Cart\Delivery\Struct\DeliveryCollection;
+use Shopware\Core\Checkout\Cart\Error\ErrorCollection;
 use Shopware\Core\Checkout\Cart\LineItem\CartDataCollection;
 use Shopware\Core\Checkout\Cart\LineItem\LineItem;
 use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
@@ -121,6 +125,19 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       ];
     }
   }
+  private function cloneCart(Cart $cart): Cart
+  {
+    $errors = new ErrorCollection();
+    foreach ($cart->getErrors() as $error) {
+      try {
+        $c = clone $error;
+        $errors->add($c);
+      } catch (\Throwable $e) {}
+    }
+    $cart->setErrors($errors);
+    return clone $cart;
+  }
+
 
   public function process(CartDataCollection $data, Cart $original, Cart $toCalculate, SalesChannelContext $context, CartBehavior $behavior): void
   {
@@ -130,8 +147,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
     if ($this->isTaxesUpdateNeeded() && $original->getDeliveries()->getAddresses()->getCountries()->first()) {
 
-      $avalaraCart = clone $original;
+      $avalaraCart = $this->cloneCart($original);
       $this->expandBundles($avalaraCart, $context);
+
       $service = $adapter->getService('GetTax');
       $this->avalaraTaxes = $service->getAvalaraTaxes($avalaraCart, $context, $this->session, $this->categoryRepository);
       $this->collapseBundleTaxes();
