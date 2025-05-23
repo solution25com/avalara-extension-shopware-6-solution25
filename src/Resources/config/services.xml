@@ -10,7 +10,6 @@
         <service id="AvalaraExtension\Core\Checkout\Cart\AvalaraPriceProcessorDecorate" decorates="MoptAvalara6\Core\Checkout\Cart\OverwritePriceProcessor">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService" />
             <argument type="service" id="category.repository" />
-            <argument type="service" id="product.repository" />
             <argument type="service" id="monolog.logger" />
             <argument type="service" id="AvalaraExtension\Core\Checkout\Cart\AvalaraPriceProcessorDecorate.inner"/>
             <tag name="shopware.cart.processor" priority="-5200"/>
