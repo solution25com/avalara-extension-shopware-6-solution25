@@ -81,9 +81,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
         $child->setStates($product->getStates());
 
-        $price = $product->getPrice()->first()->getNet();
+        $price = $row['productPrice']['net'];
 
-        $lineTotal = $price * $row['quantityInBundle'];
+        $lineTotal = $price * $row['quantityInBundle'] * $bundle->getQuantity();
         $rate = $product->getTax()->getTaxRate() ?? 0.0;
         $taxAmount = $lineTotal * $rate / 100;
 
@@ -92,7 +92,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         $child->setRemovable(true);
 
         $child->setPrice(
-          new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $row['quantityInBundle'])
+          new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $row['quantityInBundle'] * $bundle->getQuantity())
         );
         $cart->add($child);
 
