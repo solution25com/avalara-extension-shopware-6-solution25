@@ -74,7 +74,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
         $child = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, $product->getId(), $row['quantityInBundle']);
         $child->setPayloadValue('productNumber', $sku);
-
+        $child->setStackable(true);
         $child->setPayloadValue('customFields', $product->getTranslated()['customFields']);
 
         $child->setLabel($row['productName']);
@@ -87,10 +87,11 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         $rate = $product->getTax()->getTaxRate() ?? 0.0;
         $taxAmount = $lineTotal * $rate / 100;
 
+        $child->setQuantity($row['quantityInBundle'] * $bundle->getQuantity());
+
         $taxRules = new TaxRuleCollection([new TaxRule($rate)]);
         $taxes = new CalculatedTaxCollection([new CalculatedTax($taxAmount, $rate, $lineTotal)]);
         $child->setRemovable(true);
-
         $child->setPrice(
           new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $row['quantityInBundle'] * $bundle->getQuantity())
         );
@@ -157,9 +158,18 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
       if (isset($productMap[$productNumber])) {
         if ($productMap[$productNumber]->getId() !== $lineItem->getId()) {
+
+          $price = $productMap[$productNumber]->getPrice();
+
           $productMap[$productNumber]->setQuantity(
             $productMap[$productNumber]->getQuantity() + $lineItem->getQuantity()
           );
+
+          $productMap[$productNumber]->setPrice(new CalculatedPrice(
+            $price->getUnitPrice(), $price->getUnitPrice() * $productMap[$productNumber]->getQuantity(), $price->getCalculatedTaxes(), $price->getTaxRules(), $productMap[$productNumber]->getQuantity()
+          ));
+
+
           $idsToRemove[] = $lineItem;
         }
       } else {
