@@ -13,6 +13,8 @@ use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -29,6 +31,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
   private EntityRepository $categoryRepository;
 
+  private EntityRepository $productRepository;
   private Session $session;
 
   private $avalaraTaxes;
@@ -40,12 +43,14 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
   public function __construct(
     SystemConfigService $systemConfigService,
     EntityRepository    $categoryRepository,
+    EntityRepository    $productRepository,
     Logger              $loggerMonolog,
   )
   {
     $this->systemConfigService = $systemConfigService;
     $this->session = new SessionService();
     $this->categoryRepository = $categoryRepository;
+    $this->productRepository = $productRepository;
     $this->logger = $loggerMonolog;
   }
 
@@ -63,8 +68,16 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       foreach ($children as $row) {
 
         $product = array_find($productsInBundle, function ($key) use ($row) {
+          if (!is_object($key) || !method_exists($key, 'getId')) {
+            return false;
+          }
           return $key->getId() == $row['productId'];
         });
+
+        if (!$product && $row['productId']) {
+          $criteria = new Criteria([$row['productId']]);
+          $product = $this->productRepository->search($criteria, $context->getContext())->first();
+        }
 
         if (!$product) {
           continue;
