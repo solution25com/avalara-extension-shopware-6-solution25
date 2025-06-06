@@ -379,9 +379,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       $price->getTotalPrice()
     );
 
-//    if ($this->avalaraTaxes[$productNumber]['tax'] == 0) {
-//      $this->avalaraTaxes[$productNumber]['rate'] = 0;
-//    }
+    if ($this->avalaraTaxes[$productNumber]['tax'] == 0) {
+      $this->avalaraTaxes[$productNumber]['rate'] = 0;
+    }
 
     //For TaxRules
     $taxRules[] = new TaxRule($this->avalaraTaxes[$productNumber]['rate']);
