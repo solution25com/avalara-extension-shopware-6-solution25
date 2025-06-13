@@ -15,6 +15,7 @@ use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -61,6 +62,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       if (!$children) {
         continue;
       }
+      $bundle->setPayloadValue('bundleChildrenTax', []);
       $productsInBundle = $bundle->getPayloadValue('zeobvProductsInBundle');
 
       $cart->remove($bundle->getId());
@@ -244,6 +246,23 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       }
     }
   }
+  private function applyTaxesToChildren(Cart $cart, array $avalaraResult): array
+  {
+    $allChildren = [];
+
+    foreach ($cart->getLineItems() as $lineItem) {
+      foreach ($lineItem->getChildren() as $childLineItem) {
+        $productNumber = $childLineItem->getPayloadValue('productNumber');
+
+        if ($productNumber && isset($avalaraResult[$productNumber])) {
+          $taxInfo = $avalaraResult[$productNumber];
+          $childLineItem->setPayloadValue('AvalaraLineItemChildTax', $taxInfo);
+        }
+        $allChildren[] = $childLineItem;
+      }
+    }
+    return $allChildren;
+  }
 
   private function updateLineItemsForRefund(Cart $cart): void
   {
@@ -282,7 +301,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
     if ($this->isTaxesUpdateNeeded() && $original->getDeliveries()->getAddresses()->getCountries()->first()) {
 
+
       $avalaraCart = $this->cloneCart($original);
+      $this->expandBundles($avalaraCart, $context, $this->avalaraTaxes);
 
 //      $this->updateLineItemsForRefund($avalaraCart);
       $this->expandBundles($avalaraCart, $context);
@@ -290,6 +311,8 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
       $service = $adapter->getService('GetTax');
       $this->avalaraTaxes = $service->getAvalaraTaxes($avalaraCart, $context, $this->session, $this->categoryRepository);
+      $avalaraResult = $this->avalaraTaxes;
+      $this->applyTaxesToChildren($toCalculate, $avalaraResult);
       $this->collapseBundleTaxes($avalaraCart);
       $this->validateTaxes($adapter, $toCalculate);
     }

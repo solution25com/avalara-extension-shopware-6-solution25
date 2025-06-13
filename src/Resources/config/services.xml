@@ -16,5 +16,10 @@
             <tag name="shopware.cart.processor" priority="-5200"/>
         </service>
 
+        <service id="AvalaraExtension\Subscriber\OrderPlacedSubscriber">
+            <argument type="service" id="order_line_item.repository" />
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
     </services>
 </container>
