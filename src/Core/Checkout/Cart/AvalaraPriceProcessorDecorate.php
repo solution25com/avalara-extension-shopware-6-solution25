@@ -303,8 +303,6 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
 
       $avalaraCart = $this->cloneCart($original);
-      $this->expandBundles($avalaraCart, $context, $this->avalaraTaxes);
-
 //      $this->updateLineItemsForRefund($avalaraCart);
       $this->expandBundles($avalaraCart, $context);
       $this->mergeSameProducts($avalaraCart);
