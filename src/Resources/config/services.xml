@@ -16,6 +16,15 @@
             <tag name="shopware.cart.processor" priority="-5200"/>
         </service>
 
+        <service id="AvalaraExtension\Core\Checkout\Cart\BundleProductProcessorDecorate" decorates="Zeobv\BundleProducts\Core\Checkout\Cart\Collectors\BundleProductProcessor">
+            <argument type="service" id="Shopware\Core\Checkout\Cart\Price\QuantityPriceCalculator" />
+            <argument type="service" id="zeobv.bundle_products.service.bundle_discount_calculator" />
+            <argument type="service" id="zeobv.bundle_products.service.bundle_product_reconfigurator" />
+            <argument type="service" id="AvalaraExtension\Core\Checkout\Cart\BundleProductProcessorDecorate.inner"/>
+            <!-- Inject after product processor(5000), promotion processor(4900) and custom product processor(4950) -->
+            <tag name="shopware.cart.processor" priority="4850" />
+        </service>
+
         <service id="AvalaraExtension\Subscriber\OrderPlacedSubscriber">
             <argument type="service" id="order_line_item.repository" />
             <tag name="kernel.event_subscriber"/>
