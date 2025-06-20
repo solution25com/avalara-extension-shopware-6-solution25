@@ -2,8 +2,9 @@
 
 namespace AvalaraExtension\Core\Checkout\Cart;
 
+use AvalaraExtension\Adapter\AvalaraExtensionAdapter;
+use AvalaraExtension\Service\AvalaraExtensionSessionService;
 use MoptAvalara6\Bootstrap\Form;
-use MoptAvalara6\Service\SessionService;
 use Shopware\Core\Checkout\Cart\Cart;
 use Shopware\Core\Checkout\Cart\CartBehavior;
 use Shopware\Core\Checkout\Cart\Error\ErrorCollection;
@@ -15,11 +16,9 @@ use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
-use Symfony\Component\HttpFoundation\Session\Session;
 use MoptAvalara6\Adapter\AvalaraSDKAdapter;
 use Monolog\Logger;
 use MoptAvalara6\Core\Checkout\Cart\OverwritePriceProcessor;
@@ -33,7 +32,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
   private EntityRepository $categoryRepository;
 
   private EntityRepository $productRepository;
-  private Session $session;
+  private AvalaraExtensionSessionService $session;
 
   private $avalaraTaxes;
 
@@ -49,7 +48,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
   )
   {
     $this->systemConfigService = $systemConfigService;
-    $this->session = new SessionService();
+    $this->session = new AvalaraExtensionSessionService();
     $this->categoryRepository = $categoryRepository;
     $this->productRepository = $productRepository;
     $this->logger = $loggerMonolog;
@@ -151,13 +150,13 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         $bundleTax += $mergedTax * $childShare;
         $bundleNet += $childNet;
 
-        $this->avalaraTaxes[$childSku]['tax'] = round($mergedTax * (1 - $childShare), 2);
+//        $this->avalaraTaxes[$childSku]['tax'] = round($mergedTax * (1 - $childShare), 2);
       }
 
       if ($bundleNet > 0.0) {
         $this->avalaraTaxes[$bundleSku] = [
           'tax'  => round($bundleTax, 2),
-          'rate' => round($bundleTax / $bundleNet * 100, 4),
+          'rate' => round($bundleTax / $bundleNet * 100, 3),
         ];
       }
     }
@@ -296,7 +295,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
   public function process(CartDataCollection $data, Cart $original, Cart $toCalculate, SalesChannelContext $context, CartBehavior $behavior): void
   {
     $salesChannelId = $context->getSalesChannel()->getId();
-    $adapter = new AvalaraSDKAdapter($this->systemConfigService, $this->logger, $salesChannelId);
+
+    $adapter = new AvalaraExtensionAdapter($this->systemConfigService, $this->logger, $salesChannelId);
+//    $adapter = new AvalaraSDKAdapter($this->systemConfigService, $this->logger, $salesChannelId);
     $this->avalaraTaxes = $this->session->getValue(Form::SESSION_AVALARA_TAXES_TRANSFORMED, $adapter);
 
     if ($this->isTaxesUpdateNeeded() && $original->getDeliveries()->getAddresses()->getCountries()->first()) {
@@ -305,9 +306,10 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       $avalaraCart = $this->cloneCart($original);
 //      $this->updateLineItemsForRefund($avalaraCart);
       $this->expandBundles($avalaraCart, $context);
-      $this->mergeSameProducts($avalaraCart);
+//      $this->mergeSameProducts($avalaraCart);
 
-      $service = $adapter->getService('GetTax');
+//      $service = $adapter->getService('GetTax');
+      $service = $adapter->getService('AvalaraExtensionGetTaxService');
       $this->avalaraTaxes = $service->getAvalaraTaxes($avalaraCart, $context, $this->session, $this->categoryRepository);
       $avalaraResult = $this->avalaraTaxes;
       $this->applyTaxesToChildren($toCalculate, $avalaraResult);
@@ -428,7 +430,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
    * @param Cart $toCalculate
    * @return void
    */
-  private function validateTaxes(AvalaraSDKAdapter $adapter, Cart $toCalculate)
+  private function validateTaxes(Mixed $adapter, Cart $toCalculate)
   {
     if ($adapter->getPluginConfig(Form::BLOCK_CART_ON_ERROR_FIELD)) {
       $products = $toCalculate->getLineItems()->filterType(LineItem::PRODUCT_LINE_ITEM_TYPE);

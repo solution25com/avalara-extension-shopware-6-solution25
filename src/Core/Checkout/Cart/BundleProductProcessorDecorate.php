@@ -10,7 +10,6 @@ use Shopware\Core\Checkout\Cart\CartBehavior;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Checkout\Cart\LineItem\LineItem;
 use Shopware\Core\Content\Product\ProductCollection;
-use Shopware\Core\Checkout\Cart\CartProcessorInterface;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Zeobv\BundleProducts\Core\Checkout\Cart\Collectors\BundleProductCollector;
 use Zeobv\BundleProducts\Core\Checkout\Cart\Collectors\BundleProductProcessor;
