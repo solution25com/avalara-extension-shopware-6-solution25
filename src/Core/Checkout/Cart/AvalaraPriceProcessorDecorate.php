@@ -39,6 +39,8 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
   private Logger $logger;
 
   private array $bundleChildMap = [];
+  private array $childUsageMap = [];
+
 
   public function __construct(
     SystemConfigService $systemConfigService,
@@ -61,18 +63,16 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       if (!$children) {
         continue;
       }
+
+      $bundleSku = $bundle->getPayloadValue('productNumber');
       $bundle->setPayloadValue('bundleChildrenTax', []);
       $productsInBundle = $bundle->getPayloadValue('zeobvProductsInBundle');
 
       $cart->remove($bundle->getId());
 
       foreach ($children as $row) {
-
         $product = array_find($productsInBundle, function ($key) use ($row) {
-          if (!is_object($key) || !method_exists($key, 'getId')) {
-            return false;
-          }
-          return $key->getId() == $row['productId'];
+          return is_object($key) && method_exists($key, 'getId') && $key->getId() === $row['productId'];
         });
 
         if (!$product && $row['productId']) {
@@ -85,80 +85,76 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         }
 
         $sku = $product->getProductNumber();
-
-        $child = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, $product->getId(), $row['quantityInBundle']);
-        $child->setPayloadValue('productNumber', $sku);
-        $child->setStackable(true);
-        $child->setPayloadValue('customFields', $product->getTranslated()['customFields']);
-
-        $child->setLabel($row['productName']);
-
-        $child->setStates($product->getStates());
-
+        $rate = $product->getTax()?->getTaxRate() ?? 0.0;
         $price = $row['productPrice']['net'];
-
-        $lineTotal = $price * $row['quantityInBundle'] * $bundle->getQuantity();
-        $rate = $product->getTax()->getTaxRate() ?? 0.0;
+        $quantity = $row['quantityInBundle'] * $bundle->getQuantity();
+        $lineTotal = $price * $quantity;
         $taxAmount = $lineTotal * $rate / 100;
 
-        $child->setQuantity($row['quantityInBundle'] * $bundle->getQuantity());
+        $child = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, $product->getId(), $quantity);
+        $child->setPayloadValue('productNumber', $sku);
+        $child->setLabel($row['productName']);
+        $child->setPayloadValue('customFields', $product->getTranslated()['customFields']);
+        $child->setStackable(true);
+        $child->setStates($product->getStates());
+        $child->setRemovable(true);
 
         $taxRules = new TaxRuleCollection([new TaxRule($rate)]);
         $taxes = new CalculatedTaxCollection([new CalculatedTax($taxAmount, $rate, $lineTotal)]);
-        $child->setRemovable(true);
-        $child->setPrice(
-          new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $row['quantityInBundle'] * $bundle->getQuantity())
-        );
+        $child->setPrice(new CalculatedPrice($price, $lineTotal, $taxes, $taxRules, $quantity));
+
         $cart->add($child);
 
-        $this->bundleChildMap[$bundle->getPayloadValue('productNumber')][$sku] = $lineTotal;
+        // Track for bundle collapse
+        $this->bundleChildMap[$bundleSku][] = [
+          'productNumber' => $sku,
+          'quantity' => $quantity,
+          'lineTotal' => $lineTotal,
+        ];
+
+        // Track for tax allocation
+        $this->childUsageMap[$sku][] = [
+          'bundleSku' => $bundleSku,
+          'quantity' => $quantity,
+          'lineTotal' => $lineTotal,
+        ];
       }
     }
   }
 
   private function collapseBundleTaxes(Cart $cart): void
   {
-    foreach ($this->bundleChildMap as $bundleSku => $childRows) {
+    foreach ($this->childUsageMap as $sku => $bundleUses) {
+      if (!isset($this->avalaraTaxes[$sku])) {
+        continue;
+      }
 
-      $bundleTax = 0.0;
-      $bundleNet = 0.0;
+      $totalLineTotal = array_sum(array_column($bundleUses, 'lineTotal'));
+      $totalTax = $this->avalaraTaxes[$sku]['tax'];
 
-      foreach ($childRows as $childSku => $childNet) {
+      foreach ($bundleUses as $usage) {
+        $bundleSku = $usage['bundleSku'];
+        $lineTotal = $usage['lineTotal'];
 
-        if (!isset($this->avalaraTaxes[$childSku])) {
+        if ($totalLineTotal <= 0.0) {
           continue;
         }
 
-        $row = null;
-        foreach ($cart->getLineItems() as $li) {
-          if ($li->getPayloadValue('productNumber') === $childSku) {
-            $row = $li;
-            break;
-          }
+        $share = $lineTotal / $totalLineTotal;
+        $shareTax = $totalTax * $share;
+
+        if (!isset($this->avalaraTaxes[$bundleSku])) {
+          $this->avalaraTaxes[$bundleSku] = [
+            'tax' => 0.0,
+            'rate' => 0.0,
+          ];
         }
-        if (!$row) {
-          continue;
-        }
 
-        $mergedQty  = $row->getQuantity();
-        $unitPrice  = $row->getPrice()->getUnitPrice();
-        $mergedNet  = $unitPrice * $mergedQty;
-        $mergedTax  = $this->avalaraTaxes[$childSku]['tax'];
-
-        $childShare = $childNet / $mergedNet;
-
-        $bundleTax += $mergedTax * $childShare;
-        $bundleNet += $childNet;
-
-//        $this->avalaraTaxes[$childSku]['tax'] = round($mergedTax * (1 - $childShare), 2);
+        $this->avalaraTaxes[$bundleSku]['tax'] += $shareTax;
+        $this->avalaraTaxes[$bundleSku]['rate'] = round(($this->avalaraTaxes[$bundleSku]['tax'] / $lineTotal) * 100, 3);
       }
 
-      if ($bundleNet > 0.0) {
-        $this->avalaraTaxes[$bundleSku] = [
-          'tax'  => round($bundleTax, 2),
-          'rate' => round($bundleTax / $bundleNet * 100, 3),
-        ];
-      }
+      unset($this->avalaraTaxes[$sku]);
     }
   }
 
@@ -253,13 +249,36 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       foreach ($lineItem->getChildren() as $childLineItem) {
         $productNumber = $childLineItem->getPayloadValue('productNumber');
 
-        if ($productNumber && isset($avalaraResult[$productNumber])) {
-          $taxInfo = $avalaraResult[$productNumber];
-          $childLineItem->setPayloadValue('AvalaraLineItemChildTax', $taxInfo);
+        if (!$productNumber || !isset($avalaraResult[$productNumber])) {
+          $allChildren[] = $childLineItem;
+          continue;
         }
+
+        $taxData = $avalaraResult[$productNumber];
+
+        $totalAvalaraTax = $taxData['tax'] ?? 0.0;
+        $totalAvalaraQty = $taxData['quantity'] ?? 1;
+        $rate = $taxData['rate'] ?? 0.0;
+
+        if ($totalAvalaraQty <= 0) {
+          $totalAvalaraQty = 1;
+        }
+
+        $childQty = $childLineItem->getQuantity();
+        $unitTax = $totalAvalaraTax / $totalAvalaraQty;
+        $childTaxAmount = $unitTax * $childQty;
+
+        $calculatedTaxInfo = [
+          'tax' => $childTaxAmount,
+          'rate' => $rate,
+          'quantity' => $childQty,
+        ];
+
+        $childLineItem->setPayloadValue('AvalaraLineItemChildTax', $calculatedTaxInfo);
         $allChildren[] = $childLineItem;
       }
     }
+
     return $allChildren;
   }
 
@@ -306,9 +325,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       $avalaraCart = $this->cloneCart($original);
 //      $this->updateLineItemsForRefund($avalaraCart);
       $this->expandBundles($avalaraCart, $context);
-//      $this->mergeSameProducts($avalaraCart);
-
-//      $service = $adapter->getService('GetTax');
+      $this->mergeSameProducts($avalaraCart);
       $service = $adapter->getService('AvalaraExtensionGetTaxService');
       $this->avalaraTaxes = $service->getAvalaraTaxes($avalaraCart, $context, $this->session, $this->categoryRepository);
       $avalaraResult = $this->avalaraTaxes;

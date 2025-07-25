@@ -76,11 +76,11 @@ class AvalaraExtensionGetTaxService extends AbstractService
       $session->setValue(Form::SESSION_AVALARA_MODEL, serialize($avalaraRequest), $this->getAdapter());
       $session->setValue(Form::SESSION_AVALARA_MODEL_KEY, $avalaraRequestKey, $this->getAdapter());
 
-      $count = 1;
-      foreach ($avalaraRequest->{'lines'} as $lineItem) {
-        $lineItem->{'number'} .= '_bundleItem_' . $count;
-        $count++;
-      }
+//      $count = 1;
+//      foreach ($avalaraRequest->{'lines'} as $lineItem) {
+//        $lineItem->{'number'} .= '_bundleItem_' . $count;
+//        $count++;
+//      }
       return $this->makeAvalaraCall($avalaraRequest, $session, $cart);
     }
 
@@ -188,9 +188,15 @@ class AvalaraExtensionGetTaxService extends AbstractService
       foreach ($line->details as $detail) {
         $rate += $detail->rate;
       }
-      $transformedTax[$line->itemCode] = [
-        'tax' => $line->tax,
+
+      $itemCode = $line->itemCode;
+      $taxAmount = $line->tax;
+      $quantity = $line->quantity ?? 1;
+
+      $transformedTax[$itemCode] = [
+        'tax' => $taxAmount,
         'rate' => $rate * 100,
+        'quantity' => $quantity,
       ];
     }
 
@@ -202,6 +208,7 @@ class AvalaraExtensionGetTaxService extends AbstractService
       $transformedTax[$promotionId] = [
         'tax' => 0,
         'rate' => 0,
+        'quantity' => 1,
       ];
     }
 
