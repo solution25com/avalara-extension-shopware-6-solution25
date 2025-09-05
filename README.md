@@ -15,6 +15,10 @@ This extension helps merchants customize and stabilize Avalara integration in th
 5. **Backend Feedback**
    - Provides clearer backend error messages when tax validation fails.
 ---
+
+## Compatibility
+- ✅ Shopware 6.6.x 
+
 ## Get Started
 ### Installation & Activation
 1. **Install the Avalara Base Plugin**
