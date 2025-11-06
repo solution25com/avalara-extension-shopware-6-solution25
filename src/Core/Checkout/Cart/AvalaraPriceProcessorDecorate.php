@@ -16,6 +16,7 @@ use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -76,7 +77,8 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         });
 
         if (!$product && $row['productId']) {
-          $criteria = new Criteria([$row['productId']]);
+          $criteria = new Criteria();
+          $criteria->addFilter(new EqualsFilter('productNumber', $row['productNumber']));;
           $product = $this->productRepository->search($criteria, $context->getContext())->first();
         }
 
@@ -272,6 +274,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
           'tax' => $childTaxAmount,
           'rate' => $rate,
           'quantity' => $childQty,
+          'bundleParentId' => $lineItem->getId(),
         ];
 
         $childLineItem->setPayloadValue('AvalaraLineItemChildTax', $calculatedTaxInfo);
@@ -360,7 +363,6 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       }
 
       $originalPrice = $product->getPrice();
-
 
       $avalaraProductPriceCalculated = $this->itemPriceCalculator($originalPrice, $productNumber);
 
@@ -479,8 +481,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
       'google-capture',
       'apple-capture',
       'api/_proxy-order/',
-      'api/_action/order/',
-      '/return'
+      'api/_action/order/'
     ];
 
 

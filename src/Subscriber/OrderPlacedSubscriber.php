@@ -38,6 +38,7 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
     }
 
     $updates = [];
+    $bundleGroups = [];
 
     foreach ($lineItems as $item) {
       $payload = $item->getPayload();
@@ -48,23 +49,31 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
 
       $avalara = $payload['AvalaraLineItemChildTax'];
 
-      if (!isset($avalara['tax'], $avalara['rate'])) {
+      if (!isset($avalara['tax'], $avalara['rate'], $avalara['bundleParentId'])) {
         continue;
       }
 
+      $parentId = $avalara['bundleParentId'];
       $taxAmount = (float) $avalara['tax'];
       $taxRate = (float) $avalara['rate'];
+      $childTotal = $item->getPrice()->getTotalPrice();
+
+      if (!isset($bundleGroups[$parentId])) {
+        $bundleGroups[$parentId] = [
+          'rates' => [],
+        ];
+      }
+
+      $bundleGroups[$parentId]['rates'][] = $taxRate;
+
       $originalPrice = $item->getPrice();
-      $calculatedTax = new CalculatedTax($taxAmount, $taxRate, $originalPrice->getTotalPrice());
+      $calculatedTax = new CalculatedTax($taxAmount, $taxRate, $childTotal);
       $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
-
-
-      $taxRule = new TaxRule($taxRate);
-      $taxRules = new TaxRuleCollection([$taxRule]);
+      $taxRules = new TaxRuleCollection([new TaxRule($taxRate)]);
 
       $newPrice = new CalculatedPrice(
         $originalPrice->getUnitPrice(),
-        $originalPrice->getTotalPrice(),
+        $childTotal,
         $taxCollection,
         $taxRules,
         $originalPrice->getQuantity(),
@@ -74,6 +83,49 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
 
       $updates[] = [
         'id' => $item->getId(),
+        'price' => $newPrice,
+      ];
+    }
+
+    foreach ($lineItems as $item) {
+      $payload = $item->getPayload();
+
+      if (!isset($payload['bundleContent'])) {
+        continue;
+      }
+
+      $bundleId = $item->getIdentifier();
+      if (!isset($bundleGroups[$bundleId])) {
+        continue;
+      }
+
+      $bundleParentId = $item->getId();
+
+      $rates = $bundleGroups[$bundleId]['rates'];
+
+      $avgTaxRate = count($rates) > 0 ? array_sum($rates) / count($rates) : 0.0;
+
+      $originalPrice = $item->getPrice();
+      $totalPrice = $originalPrice->getTotalPrice();
+
+      $taxAmount = $totalPrice * $avgTaxRate / 100;
+
+      $calculatedTax = new CalculatedTax($taxAmount, $avgTaxRate, $totalPrice);
+      $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
+      $taxRules = new TaxRuleCollection([new TaxRule($avgTaxRate)]);
+
+      $newPrice = new CalculatedPrice(
+        $originalPrice->getUnitPrice(),
+        $totalPrice,
+        $taxCollection,
+        $taxRules,
+        $originalPrice->getQuantity(),
+        $originalPrice->getReferencePrice(),
+        $originalPrice->getListPrice()
+      );
+
+      $updates[] = [
+        'id' => $bundleParentId,
         'price' => $newPrice,
       ];
     }
