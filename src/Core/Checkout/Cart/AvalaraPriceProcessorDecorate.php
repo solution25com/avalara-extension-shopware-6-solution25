@@ -88,7 +88,9 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
         $sku = $product->getProductNumber();
         $rate = $product->getTax()?->getTaxRate() ?? 0.0;
-        $price = $row['productPrice']['net'];
+        $price = isset($row['productPrice']['listPrice']['net'])
+          ? $row['productPrice']['listPrice']['net']
+          : $row['productPrice']['net'];
         $quantity = $row['quantityInBundle'] * $bundle->getQuantity();
         $lineTotal = $price * $quantity;
         $taxAmount = $lineTotal * $rate / 100;
