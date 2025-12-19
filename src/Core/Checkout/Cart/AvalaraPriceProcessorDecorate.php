@@ -128,37 +128,37 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
   private function collapseBundleTaxes(Cart $cart): void
   {
-    foreach ($this->childUsageMap as $sku => $bundleUses) {
-      if (!isset($this->avalaraTaxes[$sku])) {
-        continue;
-      }
+    foreach ($this->bundleChildMap as $bundleSku => $childRows) {
 
-      $totalLineTotal = array_sum(array_column($bundleUses, 'lineTotal'));
-      $totalTax = $this->avalaraTaxes[$sku]['tax'];
+      $bundleTax = 0.0;
+      $bundleNet = 0.0;
 
-      foreach ($bundleUses as $usage) {
-        $bundleSku = $usage['bundleSku'];
-        $lineTotal = $usage['lineTotal'];
+      foreach ($childRows as $row) {
+        $childSku  = $row['productNumber'];
+        $lineTotal = $row['lineTotal'];
 
-        if ($totalLineTotal <= 0.0) {
+        if (!isset($this->avalaraTaxes[$childSku])) {
           continue;
         }
 
-        $share = $lineTotal / $totalLineTotal;
-        $shareTax = $totalTax * $share;
+        $bundleTax += $this->avalaraTaxes[$childSku]['tax'];
+        $bundleNet += $lineTotal;
 
-        if (!isset($this->avalaraTaxes[$bundleSku])) {
-          $this->avalaraTaxes[$bundleSku] = [
-            'tax' => 0.0,
-            'rate' => 0.0,
-          ];
-        }
-
-        $this->avalaraTaxes[$bundleSku]['tax'] += $shareTax;
-        $this->avalaraTaxes[$bundleSku]['rate'] = round(($this->avalaraTaxes[$bundleSku]['tax'] / $lineTotal) * 100, 3);
+        //  remove child so it won't be taxed separately
+        unset($this->avalaraTaxes[$childSku]);
       }
 
-      unset($this->avalaraTaxes[$sku]);
+      if ($bundleNet <= 0.0) {
+        continue;
+      }
+
+      //  effective weighted rate
+      $bundleRate = round(($bundleTax / $bundleNet) * 100, 3);
+
+      $this->avalaraTaxes[$bundleSku] = [
+        'tax'  => $bundleTax,
+        'rate' => $bundleRate,
+      ];
     }
   }
 
