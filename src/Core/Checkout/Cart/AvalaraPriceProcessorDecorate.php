@@ -144,7 +144,6 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         $bundleTax += $this->avalaraTaxes[$childSku]['tax'];
         $bundleNet += $lineTotal;
 
-        //  remove child so it won't be taxed separately
         unset($this->avalaraTaxes[$childSku]);
       }
 
@@ -152,8 +151,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         continue;
       }
 
-      //  effective weighted rate
-      $bundleRate = round(($bundleTax / $bundleNet) * 100, 3);
+      $bundleRate = round(($bundleTax / $bundleNet) * 100, 4);
 
       $this->avalaraTaxes[$bundleSku] = [
         'tax'  => $bundleTax,
