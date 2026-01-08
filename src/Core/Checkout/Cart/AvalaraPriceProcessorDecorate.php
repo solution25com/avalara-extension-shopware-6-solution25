@@ -88,9 +88,30 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
 
         $sku = $product->getProductNumber();
         $rate = $product->getTax()?->getTaxRate() ?? 0.0;
-        $price = isset($row['productPrice']['listPrice']['net'])
-          ? $row['productPrice']['listPrice']['net']
-          : $row['productPrice']['net'];
+        $price = $row['productPrice']['net'] ?? null;
+
+        if ($price === null) {
+          // Fallback ONLY if net is missing
+          if (isset($row['productPrice']['gross'], $rate) && $rate > 0) {
+            $price = round(
+              $row['productPrice']['gross'] / (1 + ($rate / 100)),
+              2
+            );
+
+            $this->logger->warning('BUNDLE PRICE FALLBACK (derived net)', [
+              'sku' => $sku,
+              'gross' => $row['productPrice']['gross'],
+              'derivedNet' => $price,
+            ]);
+          } else {
+            // skip so it doesn't over-tax
+            $this->logger->error('BUNDLE PRICE MISSING NET', [
+              'sku' => $sku,
+              'productPrice' => $row['productPrice'],
+            ]);
+            continue;
+          }
+        }
         $quantity = $row['quantityInBundle'] * $bundle->getQuantity();
         $lineTotal = $price * $quantity;
         $taxAmount = $lineTotal * $rate / 100;
@@ -151,7 +172,7 @@ class AvalaraPriceProcessorDecorate extends OverwritePriceProcessor
         continue;
       }
 
-      $bundleRate = round(($bundleTax / $bundleNet) * 100, 4);
+      $bundleRate = round(($bundleTax / $bundleNet) * 100, 3);
 
       $this->avalaraTaxes[$bundleSku] = [
         'tax'  => $bundleTax,
