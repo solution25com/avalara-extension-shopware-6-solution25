@@ -40,6 +40,9 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
     $updates = [];
     $bundleGroups = [];
 
+    /**
+     * CHILD ITEMS
+     */
     foreach ($lineItems as $item) {
       $payload = $item->getPayload();
 
@@ -53,9 +56,9 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
         continue;
       }
 
-      $parentId = $avalara['bundleParentId'];
+      $parentId  = $avalara['bundleParentId'];
       $taxAmount = (float) $avalara['tax'];
-      $taxRate = (float) $avalara['rate'];
+      $taxRate   = (float) $avalara['rate'];
       $childTotal = $item->getPrice()->getTotalPrice();
 
       if (!isset($bundleGroups[$parentId])) {
@@ -67,9 +70,28 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
       $bundleGroups[$parentId]['rates'][] = $taxRate;
 
       $originalPrice = $item->getPrice();
+
+      //  Extract existing taxExtension
+      $taxExtension = null;
+      foreach ($originalPrice->getTaxRules() as $rule) {
+        if ($rule->hasExtension('taxExtension')) {
+          $taxExtension = $rule->getExtension('taxExtension');
+          break;
+        }
+      }
+
       $calculatedTax = new CalculatedTax($taxAmount, $taxRate, $childTotal);
       $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
-      $taxRules = new TaxRuleCollection([new TaxRule($taxRate)]);
+
+      if ($taxAmount == 0.0) {
+        $taxRules = new TaxRuleCollection([]);
+      } else {
+        $taxRule = new TaxRule($taxRate);
+        if ($taxExtension !== null) {
+          $taxRule->addExtension('taxExtension', clone $taxExtension);
+        }
+        $taxRules = new TaxRuleCollection([$taxRule]);
+      }
 
       $newPrice = new CalculatedPrice(
         $originalPrice->getUnitPrice(),
@@ -82,53 +104,133 @@ class OrderPlacedSubscriber implements EventSubscriberInterface
       );
 
       $updates[] = [
-        'id' => $item->getId(),
+        'id'    => $item->getId(),
         'price' => $newPrice,
       ];
     }
 
+        /**
+     * STANDALONE PRODUCTS (same SKU as bundle children)
+     */
     foreach ($lineItems as $item) {
-      $payload = $item->getPayload();
+        $payload = $item->getPayload();
 
-      if (!isset($payload['bundleContent'])) {
+        if (!isset($payload['AvalaraStandaloneTax'])) {
+            continue;
+        }
+
+        $avalara = $payload['AvalaraStandaloneTax'];
+
+        if (!isset($avalara['tax'], $avalara['rate'])) {
+            continue;
+        }
+
+        $taxAmount = (float) $avalara['tax'];
+        $taxRate   = (float) $avalara['rate'];
+
+        $originalPrice = $item->getPrice();
+        $totalPrice    = $originalPrice->getTotalPrice();
+
+        // Preserve existing taxExtension (important for Shopware admin/refunds)
+        $taxExtension = null;
+        foreach ($originalPrice->getTaxRules() as $rule) {
+            if ($rule->hasExtension('taxExtension')) {
+                $taxExtension = $rule->getExtension('taxExtension');
+                break;
+            }
+        }
+
+        $calculatedTax = new CalculatedTax($taxAmount, $taxRate, $totalPrice);
+        $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
+
+        if ($taxAmount == 0.0) {
+            $taxRules = new TaxRuleCollection([]);
+        } else {
+            $taxRule = new TaxRule($taxRate);
+            if ($taxExtension !== null) {
+                $taxRule->addExtension('taxExtension', clone $taxExtension);
+            }
+            $taxRules = new TaxRuleCollection([$taxRule]);
+        }
+
+        $newPrice = new CalculatedPrice(
+            $originalPrice->getUnitPrice(),
+            $totalPrice,
+            $taxCollection,
+            $taxRules,
+            $originalPrice->getQuantity(),
+            $originalPrice->getReferencePrice(),
+            $originalPrice->getListPrice()
+        );
+
+        $updates[] = [
+            'id'    => $item->getId(),
+            'price' => $newPrice,
+        ];
+    }
+
+
+    /**
+ * BUNDLE PARENTS (FIXED – NO RATE, NO RECALC)
+ */
+foreach ($lineItems as $item) {
+    $payload = $item->getPayload();
+
+    if (!isset($payload['bundleContent'])) {
         continue;
-      }
+    }
 
-      $bundleId = $item->getIdentifier();
-      if (!isset($bundleGroups[$bundleId])) {
+    $bundleId = $item->getId();
+    if (!isset($bundleGroups[$bundleId])) {
         continue;
-      }
+    }
 
-      $bundleParentId = $item->getId();
+    $originalPrice = $item->getPrice();
+    $totalPrice    = $originalPrice->getTotalPrice();
 
-      $rates = $bundleGroups[$bundleId]['rates'];
+    /**
+     *  Sum tax ONLY from children (never recalc)
+     */
+    $taxAmount = 0.0;
 
-      $avgTaxRate = count($rates) > 0 ? array_sum($rates) / count($rates) : 0.0;
+    foreach ($lineItems as $child) {
+        $childPayload = $child->getPayload();
 
-      $originalPrice = $item->getPrice();
-      $totalPrice = $originalPrice->getTotalPrice();
+        if (
+            isset($childPayload['AvalaraLineItemChildTax']) &&
+            $childPayload['AvalaraLineItemChildTax']['bundleParentId'] === $item->getId()
+        ) {
+            $taxAmount += (float) $childPayload['AvalaraLineItemChildTax']['tax'];
+        }
+    }
 
-      $taxAmount = $totalPrice * $avgTaxRate / 100;
+    /**
+     * no tax rate ,no tax rules ,Flat Avalara tax only
+     */
+    $calculatedTax = new CalculatedTax(
+        round($taxAmount, 2),
+        0.0,
+        $totalPrice
+    );
 
-      $calculatedTax = new CalculatedTax($taxAmount, $avgTaxRate, $totalPrice);
-      $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
-      $taxRules = new TaxRuleCollection([new TaxRule($avgTaxRate)]);
+    $taxCollection = new CalculatedTaxCollection([$calculatedTax]);
 
-      $newPrice = new CalculatedPrice(
+    $newPrice = new CalculatedPrice(
         $originalPrice->getUnitPrice(),
         $totalPrice,
         $taxCollection,
-        $taxRules,
+        new TaxRuleCollection([]), //   prevent refund recalculation
         $originalPrice->getQuantity(),
         $originalPrice->getReferencePrice(),
         $originalPrice->getListPrice()
-      );
+    );
 
-      $updates[] = [
-        'id' => $bundleParentId,
+    $updates[] = [
+        'id'    => $item->getId(),
         'price' => $newPrice,
-      ];
-    }
+    ];
+}
+
 
     if (!empty($updates)) {
       $this->orderLineItemRepository->update($updates, $context);
